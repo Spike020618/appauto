@@ -21,6 +21,8 @@ from appauto.manager.config_manager import LoggingConfig
 from appauto.manager.error_manager import ModelStoreCheckError, ModelStoreRunError
 
 from testcases.amaas.gen_data import amaas, DefaultParams as DP
+from appauto.operator.amaas_node.cli.amaas_node_cli import AMaaSNodeCli
+from appauto.manager.utils_manager.format_output import remove_line_break
 
 T = TypeVar("T", LLMModelStore, EmbeddingModelStore, VLMModelStore, RerankModelStore, ParserModelStore, AudioModelStore)
 
@@ -331,6 +333,80 @@ class CommonModelBaseRunner:
         finally:
             return result_item
 
+    @classmethod
+    def test_hicache(cls, tp: Literal[1, 2, 4, 8], model_store: T, total_tokens, timeout=0):
+        result_item = {}
+
+        try:
+
+            logger.info(f"test model store: {model_store.name}, tp: {tp}, id: {model_store.object_id}, create&delete instances".center(150, "="))
+            params = CommonModelBaseStep.gen_params(result_item, model_store, tp)
+
+            # check 失败后直接记录结果
+            res = CommonModelBaseStep.model_store_check(result_item, model_store, params)
+            if res.data.messages:
+                raise ModelStoreCheckError(f"model store: {model_store.name}, tp: {tp}, check failed")
+            
+            hicaches = [10, 100, 200]
+            for hicache in hicaches:
+                res = model_store.check(worker_id=1, tp=tp, access_limit=1, max_total_tokens=total_tokens, backend_parameters=[], hicache=0, timeout=timeout)
+                result_item[f"tp{tp}-tokens{total_tokens}-hicache{hicache}"] = ModelBaseTestResult.passed
+                logger.info(f"model store: {model_store.name}, tp: {tp}, total_tokens: {total_tokens}, hicache: {hicache}, check result: {res.data.retcode == 0}, messages: {res.data.messages}")
+
+        except ModelStoreCheckError:
+            logger.error(f"model store: {model_store.name}, tp: {tp},  total_tokens: {total_tokens} check failed")
+
+        except Exception as e:
+            logger.error(
+                f"error occurred in check_and_run_default_params_under_diff_tp, "
+                f"model: {model_store.name} tp: {tp},  total_tokens: {total_tokens}, error: {e}"
+            )
+            raise e
+
+        finally:
+            return result_item
+        
+    @classmethod
+    def stop_all_instances(cls, model_store: T, type_: Literal["llm", "vlm", "embedding", "rerank", "parser", "audio"]):
+        if model_list := getattr(amaas.model, type_, None):
+            ids = []
+            if target_models := [
+                m for m in model_list if m.display_model_name == model_store.name or m.object_id == model_store.name
+            ]:
+                for t_m in target_models:
+                    # TODO 当前存在副本残留的 bug, 后面修复后要删除这里的逻辑, 预期 model.stop 要停止所有的副本
+                    if len(all_ins := t_m.instances) > 1:
+                        for ins in all_ins[:-1]:
+                            ids.append(ins.object_id)
+                    t_m.stop()
+            #amaas = AMaaSNode("120.211.1.55", ssh_user="zkyd", skip_api=True)
+            # detect and remove residual containers
+            return cls.instance_check_and_stop(ids)
+        
+    def instance_check_and_stop(self, ids: list) -> list:
+        """
+        检查每个 id 对应的容器是否存在，存在则停止，并返回操作结果。
+        返回值示例: [{"id": "xxx", "existed": True, "stopped": True}, ...]
+        """
+        results = []
+        for id in ids:
+            try:
+                # 检查容器是否存在
+                cmd_check = (
+                    f'docker inspect {id} >/dev/null 2>&1 && echo "True" || echo "False"'
+                )
+                _, res, _ = self.run(cmd_check)
+                existed = remove_line_break(res).strip() == "True"
+                stopped = False
+                if existed:
+                    # 停止容器
+                    cmd_stop = f'docker stop {id}'
+                    amaas.run(cmd_stop)
+                    stopped = True
+                results.append({"id": id, "existed": existed, "stopped": stopped})
+            except Exception as e:
+                results.append({"id": id, "existed": False, "stopped": False, "error": str(e)})
+        return results
 
 class DoCheck:
     @classmethod

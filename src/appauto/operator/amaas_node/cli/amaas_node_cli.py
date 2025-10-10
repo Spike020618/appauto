@@ -27,6 +27,31 @@ class AMaaSNodeCli(BaseLinux):
 
         return not rc
 
+    def instance_check_and_stop(self, ids: list) -> list:
+        """
+        检查每个 id 对应的容器是否存在，存在则停止，并返回操作结果。
+        返回值示例: [{"id": "xxx", "existed": True, "stopped": True}, ...]
+        """
+        results = []
+        for id in ids:
+            try:
+                # 检查容器是否存在
+                cmd_check = (
+                    f'docker inspect {id} >/dev/null 2>&1 && echo "True" || echo "False"'
+                )
+                _, res, _ = self.run(cmd_check)
+                existed = remove_line_break(res).strip() == "True"
+                stopped = False
+                if existed:
+                    # 停止容器
+                    cmd_stop = f'docker stop {id}'
+                    self.run(cmd_stop)
+                    stopped = True
+                results.append({"id": id, "existed": existed, "stopped": stopped})
+            except Exception as e:
+                results.append({"id": id, "existed": False, "stopped": False, "error": str(e)})
+        return results
+
     def run_as_perf(
         self,
         model_name,

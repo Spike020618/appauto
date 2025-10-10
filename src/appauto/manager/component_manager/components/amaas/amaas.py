@@ -1,3 +1,4 @@
+import os
 from uuid import uuid4
 from typing import List, Optional
 from .base_component import BaseComponent
@@ -96,3 +97,26 @@ class AMaaS(BaseComponent):
         """数据概览"""
         res = self.get("get_self", url_map=DashBoard.GET_URL_MAP)
         return DashBoard(self.mgt_ip, self.port, data=res.data, amaas=self)
+    
+    def update_license(self, license_file_path, timeout: int = None) -> bool:
+        with open(license_file_path, 'rb') as file:
+            files = {
+                'license_file': (os.path.basename(license_file_path), file, 'application/octet-stream')
+            }
+            res = self.post("license", url_map={"license": "/api/auth/license"}, files=files, timeout=timeout)
+            if res.retcode == 0:
+                logger.info(f"License updated successfully: {license_file_path}")
+                return True
+            else:
+                logger.error(f"License update failed: {res.retmsg}")
+                return False
+    
+    def auth_license(self, timeout: int = None) -> tuple:
+        res = self.get("license", url_map={"license": "/api/auth/license"}, timeout=timeout)
+        if res.retcode == 0:
+            logger.info("License status retrieved successfully")
+            return True, res.data.get("license_status", False)
+        else:
+            logger.error(f"Failed to get license status: {res.retmsg}")
+            return False, False
+
