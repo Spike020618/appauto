@@ -1,3 +1,4 @@
+import os
 from uuid import uuid4
 from typing import List, Optional
 from .base_component import BaseComponent
@@ -91,8 +92,48 @@ class AMaaS(BaseComponent):
         res = self.post("create", url_map=AMaaSUser.POST_URL_MAP, json_data=data, timeout=timeout)
         return AMaaSUser(self.mgt_ip, self.port, object_id=res.data.id, data=res.data, amaas=self)
 
-    @property
-    def dashboard(self) -> DashBoard:
-        """数据概览"""
-        res = self.get("get_self", url_map=DashBoard.GET_URL_MAP)
-        return DashBoard(self.mgt_ip, self.port, data=res.data, amaas=self)
+    def update_license(self, license_file_path, timeout: int = None) -> bool:
+        logger.info(f"Uploading license file: {license_file_path}")
+        if not os.path.exists(license_file_path):
+            logger.error(f"License file not found: {license_file_path}")
+            return False
+        
+        try:
+            with open(license_file_path, 'rb') as file:
+                # 使用文件对象而不是file.read()，这样httpx可以正确处理multipart格式
+                files = {
+                    'license_file': (os.path.basename(license_file_path), file, 'application/octet-stream')
+                }
+                logger.info(f"Uploading file: {os.path.basename(license_file_path)}")
+                res = self.post("license", 
+                            url_map={"license": "/auth/license"}, 
+                            files=files,
+                            timeout=timeout)
+                #logger.info(f"License update response type: {type(res)}")
+                #logger.info(f"License update response: {res}")
+                
+                # 根据后端响应格式调整判断逻辑
+                # 后端返回的是 get_json_result(data='success')，应该包含 retcode=0
+                if hasattr(res, 'retcode') and res.retcode == 0:
+                    logger.info(f"License updated successfully: {license_file_path}")
+                    return True
+                else:
+                    error_msg = getattr(res, 'retmsg', 'Unknown error')
+                    logger.error(f"License update failed: {error_msg}")
+                    return False
+                    
+        except Exception as e:
+            logger.error(f"Error updating license: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return False
+    
+    def auth_license(self, timeout: int = None) -> tuple:
+        res = self.get("license", url_map={"license": "/auth/license"}, timeout=timeout)
+        if res.retcode == 0:
+            logger.info("License status retrieved successfully")
+            return True, res.data.get("license_status", False)
+        else:
+            logger.error(f"Failed to get license status: {res.retmsg}")
+            return False, False
+

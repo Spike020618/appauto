@@ -19,7 +19,8 @@ class DefaultParams:
     model_name: str = TEST_DATA_DICT.get("model_name", "Qwen2.5-7B-Instruct")
     max_nb_chars: int = int(TEST_DATA_DICT.get("max_nb_chars", "512"))
     scene_loop: int = int(TEST_DATA_DICT.get("scene_loop", "3"))
-
+    tokens = eval(TEST_DATA_DICT.get("tokens", "[1024, 10240, 20480, 40960]"))  # 修复这一行
+    hicache = eval(TEST_DATA_DICT.get("hicache", "[10, 100, 200]"))
 
 assert DefaultParams.ip
 
